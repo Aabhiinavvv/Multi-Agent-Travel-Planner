@@ -204,57 +204,40 @@ def airport_country_matches(airport: dict , country_code:str) -> bool:
 
 
 def get_best_airport_for_country(country_code: str):
-    country_code = country_code.upper().strip()
-    preferred = next(
-        (
-            airport_code
-            for country_name, airport_code in COUNTRY_MAIN_AIRPORTS.items()
-            if country_name_to_code(country_name) == country_code
-        ),
-        None,
-    )
+    preferred = COUNTRY_MAIN_AIRPORT.get(country_code)
 
     if preferred and preferred in AIRPORTS:
-        return preferred
+        return preferred 
 
     candidates = []
-    for iata, airport in AIRPORTS.items():
-        if iata and airport_country_matches(airport, country_code):
-            name = str(airport.get("name", "")).casefold()
-            score = 1 if "international" in name else 0
-            candidates.append((score, iata))
 
-    return max(
-        candidates,
-        default=(0, None),
-        key=lambda candidate: (candidate[0], candidate[1]),
-    )[1]
+    for iata , airports in AIRPORTS.items():
+        if not iata :
+            continue
+        if airport_country_matches(airport, country_code):
+            name = str(airport.get("name","")).lower()
+            city= str(airport.get("city","")).lower()
+
+            score = 0
+
+            if "international" in name:
+                score +=50
+            if "intl" in name:
+                score +=40
+            if "capital" in name:
+                score +=20
+            if "city" in name:
+                score +=5
+
+                candidates.append((score, iata))
+    if not candidates:
+        return None
+
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+    
     
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    
