@@ -40,5 +40,4 @@ def tavily_search(query):
             f"   {snippet}"
         )
 
-    
     return "\n\n".join(results)
