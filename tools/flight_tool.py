@@ -252,7 +252,51 @@ def resolve_location_to_iata(location:str):
     if not location:
         return None
     raw_location = location.strip()
+
+    if re.match(r"^[A-Z]{3}$", raw_location):
+        code = raw_location.upper()
+        if code in AIRPORTS:
+            return code
+
+    location_clean = clean_text(raw_location)
+    if not location_clean:
+        return None
+
+    if location_clean in CITY_MAIN_AIRPORT:
+        return CITY_MAIN_AIRPORT[location_clean]
+
+    country_code = country_name_to_code(location_clean)
+    if country_code:
+        airport = get_best_airport_for_countries(country_code)
+        if airport:
+            return airport
+
+    city_matches = []
+
+
+    for iata,airport in AIRPORTS.items():
+        city = str(airports.get("city","")).lower().strip()
+        name = str(airports.get("name","")).lower().strip()
+
+        score = 0
+        if city == location_clean:
+            score +=100
+        elif location_clean in city:
+            score +=70
+        if location_clean in name:
+            score +=50
+        if "internation" in name:
+            score +=10
+        if score >0:
+            city_matches.append(score,iata)
+    if city_matches:
+        city_matches.sort(reverse=True)
+        return city_matches[0][1]
+    return None
+
+
     
+
 
 
     
