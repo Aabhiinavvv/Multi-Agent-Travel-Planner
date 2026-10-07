@@ -237,7 +237,24 @@ def get_best_airport_for_country(country_code: str):
     return candidates[0][1]
 
 
+def resolve_location_to_iata(location:str):
+    """
+    convert country/city/airport/iata into iata code:
+
+    Examples:
+    bangladesh -> DAC
+    japan -> NRT
+    DHAKA -> DAC
+    TOKYO -> NRT
+    DAC -> DAC
+    """  
+
+    if not location:
+        return None
+    raw_location = location.strip()
     
+
+
     
 
     
