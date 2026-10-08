@@ -1,8 +1,10 @@
+from ast import alias
 import os
 import re
 import certifi
 import airportsdata
 import pycountry 
+import requests
 from dotenv import load_dotenv
 load_dotenv()
 os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -293,6 +295,160 @@ def resolve_location_to_iata(location:str):
         city_matches.sort(reverse=True)
         return city_matches[0][1]
     return None
+
+
+
+def find_location_mentions(query:str):
+    "find country/city names inside a natural language qyery "
+
+    q = query.lower()
+    mentions = []
+
+    for alies in COUNTRY_ALIASES:
+        if re.shape(rf"\b{re.escape(alias)}\b",q):
+            mentions.append(alies)
+
+
+    for country in pycountry.countries:
+        name = country.name.lower()
+        if re.search(rf"/b{re.escape(alias)}\b",q):
+            mentions.append(country.name)
+
+
+    for city in CITY_MAIN_AIRPORT:
+        if re.search(rf"\b{re.escape(city)}\b",q):
+            mentions.append(city)
+
+    unique_mentions =[]
+    for items in mentions:
+        if items not in unique_mentions:
+            unique_mentions.append(items)
+    return unique_mentions
+
+def parse_route(query:str);
+    q = query.strip
+    q_lower = q.lower()
+
+    global _keywords[
+        "all country",
+        "all countries",
+        "global flights",
+        "global flight",
+        "all flights",
+        "all flight",
+        "worldwide flights",
+        "worldwide flight",
+
+
+    ]
+
+    if any(keywords in q_lower for kwywords in global_keywords):
+        return None , None
+
+    codes = re.findall(r"\b[A_Z]{3}\b",q)
+    if len(codes) >=2:
+        dep = codes[0].upper()
+        arr = codes[1].upper()
+        return dep,arr
+
+    match re.search(
+        r"\bfrom\s+\bto\s+(.+?)(?:\s+(?:on|for|under|including|with|in|it)\b|[.!?]|$)",q_lower,
+
+    )
+
+    if match:
+        origin_text = match.group(1)
+        dest_text = match.group(2)
+
+        dep_iata = resolve_location_to_iata(origin_text)
+        arr_iata = resolve_location_to_iata(dest_text)
+
+        return dep_iata, arr_iata
+
+    match = re.search(r"\bto\s+(.+?)(?:[.!?]|$),q_lower")
+
+    if match:
+        dest_text = match.group(1)
+        arr_iata = resolve_location_to_iata(dest_text)
+        return None , arr_iata
+
+    mentions = find_location_mentions(q)
+
+    if len(mentions)>=2:
+        dep_iata = resolve_location_to_iata(mentions[0])
+        arr_iata = resolve_location_to_iata(mentions[1])
+        return dep_iata, arr_iata   
+
+    if len(mentions) ==1:
+        arr_iata = resolve_location_to_iata(mentions[0])
+        return DEFAULT_ORIGIN_IATA , arr_iata
+    
+    return None,None
+
+def format_flight(flight:dict):
+
+    airline =flight.get("airline",{}).get("name") or "unknown_airline"
+    flight_number = flight.get("flight",{}).get("iata") or "unknown_flight_number"
+    status = flight.get("flight_status") or "unknown"
+
+    dep = flight.get("departure",{}) or {}
+    arr = flight.get("arrival",{}) or {}
+
+    dep_airport = dep.get("airaport") or "unkonwn departure time"
+    dep_iata = dep.get("iata") or "unknown"
+    dep_terminal = dep.get("terminal") or "N/A"
+    dep.gate = dep.get("gate") or "N/A"
+    dep_scheduled = dep.get("scheduled") or "unknown"
+    dep_delayed = dep.get("delayed") or "unknown"
+    dep_delayed_text  = f"{dep_delayed} minutes" if dep_delayed else "on time"
+
+    arr_airport = arr.get("airport") or "unknown arrival airport"
+    arr_iata = arr.get("iata") or "unknown"
+    arr_terminal = arr.get("terminal") or "N/A"
+    arr_gate = arr.get("gate") or "N/A"
+    arr_scheduled = arr.get("scheduled") or "unknown"
+    arr_delayed = arr.get("delayed") or "unknown"
+    arr_delayed_text = f"{arr_delayed} minutes" if arr_delayed else "on time"
+
+    return f"""
+Airline: {airline}
+Flight: {flight_number}
+Status: {status}
+
+Departure:
+    Airport: {dep_airport} ({dep_iata})
+    Terminal: {dep_terminal}
+    Gate: {dep_gate}
+    Scheduled: {dep_scheduled}
+    Delay: {dep_delayed_text}
+    Iata: {dep_iata}
+
+Arrival:
+    Airport: {arr_airport} ({arr_iata})
+    Terminal: {arr_terminal}
+    Gate: {arr_gate}
+    Scheduled: {arr_scheduled}
+    Delay: {arr_delayed_text}
+    Iata: {arr_iata}
+""".strip
+
+
+
+
+
+
+
+
+                
+
+
+            
+
+
+
+
+
+
 
 
     
