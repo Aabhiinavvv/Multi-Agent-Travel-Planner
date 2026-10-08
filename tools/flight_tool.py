@@ -963,7 +963,10 @@ def search_flights(
         + "\n\n---\n\n".join(
             formatted_flights
         )
+
+        
     )
+
 
                 
 
