@@ -285,7 +285,7 @@ def country_name_to_code(text: str):
     # Try pycountry
     try:
         country = pycountry.countries.lookup(text)
-        return country.alpha2
+        return country.alpha_2
 
     except LookupError:
         pass
@@ -889,9 +889,7 @@ def search_flights(
             f"{error.get('message', 'unknown error')}"
         )
 
-    # --------------------------------------------------------
-    # Get flight data
-    # --------------------------------------------------------
+    
 
     flight_data = data.get(
         "data",
@@ -964,7 +962,7 @@ def search_flights(
             formatted_flights
         )
 
-        
+
     )
 
 
