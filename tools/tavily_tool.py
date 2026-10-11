@@ -1,29 +1,28 @@
-from tavily import TavilyClient
 import os
+import requests
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
 
-client = TavilyClient(
-    api_key=os.getenv("TAVILY_API_KEY")
-)
-
-
 def tavily_search(query):
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        raise ValueError("TAVILY_API_KEY environment variable is not set.")
 
-    
-    response = client.search(
-        query=query,
-        max_results=5
+    response = requests.post(
+        "https://api.tavily.com/search",
+        headers={"Authorization": f"Bearer {api_key}"},
+        json={"query": query, "max_results": 5},
+        timeout=30,
     )
+    response.raise_for_status()
+    search_data = response.json()
 
-    
     results = []
 
-    
-    for i, r in enumerate(response["results"], 1):
+    for i, r in enumerate(search_data["results"], 1):
 
         title = r.get("title", "unknown")
         url = r.get("url", "")
