@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102c2b">
+  <title>TripMate AI | Your next trip, thoughtfully planned</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="TripMate home">
+      <span class="brand-mark" aria-hidden="true">✳</span>
+      <span>tripmate<span class="brand-ai">.ai</span></span>
+    </a>
+    <span class="topbar-note"><span class="status-dot"></span> Your AI travel companion</span>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="page-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="eyebrow-line"></span> LESS PLANNING, MORE WANDERING</p>
+        <h1 id="page-title">Your next trip,<br><span>thoughtfully planned.</span></h1>
+        <p class="hero-description">Tell us what you have in mind. We’ll bring together flights, stays, and a day-by-day itinerary made for you.</p>
+        <div class="hero-perks" aria-label="Planning features">
+          <span><span aria-hidden="true">✈</span> Flight ideas</span>
+          <span><span aria-hidden="true">⌂</span> Places to stay</span>
+          <span><span aria-hidden="true">✦</span> Personal itinerary</span>
+        </div>
+      </div>
+
+      <div class="form-card">
+        <div class="card-heading">
+          <div>
+            <p class="card-kicker">START YOUR JOURNEY</p>
+            <h2>Where to next?</h2>
+          </div>
+          <span class="card-icon" aria-hidden="true">↗</span>
+        </div>
+        <form id="trip-form">
+          <label for="trip-message">Describe your trip</label>
+          <textarea id="trip-message" name="message" rows="5" required placeholder="For example: Plan a 5-day trip to Tokyo in April for two people, with great food and a moderate budget."></textarea>
+          <p class="input-hint">Destination, dates, budget, travel style — share whatever you know.</p>
+          <button class="submit-button" id="submit-button" type="submit">
+            <span class="button-label">Plan my trip</span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </form>
+        <p class="privacy-note"><span aria-hidden="true">✧</span> A little inspiration goes a long way.</p>
+      </div>
+    </section>
+
+    <section class="result-section" id="result-section" aria-live="polite" hidden>
+      <div class="result-heading">
+        <div>
+          <p class="card-kicker">MADE FOR YOUR JOURNEY</p>
+          <h2>Your trip plan</h2>
+        </div>
+        <button id="new-trip-button" class="text-button" type="button">Plan another trip <span aria-hidden="true">↗</span></button>
+      </div>
+      <div id="error-message" class="error-message" role="alert" hidden></div>
+      <div id="trip-result" class="result-card" hidden>
+        <div class="result-toolbar">
+          <span class="result-label"><span class="status-dot"></span> YOUR PERSONALIZED PLAN</span>
+          <button id="copy-button" class="copy-button" type="button">Copy plan</button>
+        </div>
+        <div id="answer" class="answer-content"></div>
+        <details class="details-panel">
+          <summary>Flight search details</summary>
+          <pre id="flight-results"></pre>
+        </details>
+        <details class="details-panel">
+          <summary>Hotel suggestions</summary>
+          <pre id="hotel-results"></pre>
+        </details>
+        <details class="details-panel">
+          <summary>Day-by-day itinerary</summary>
+          <pre id="itinerary"></pre>
+        </details>
+      </div>
+    </section>
+
+    <section class="bottom-note">
+      <span class="bottom-note-icon" aria-hidden="true">✳</span>
+      <p>Good trips start with a little curiosity.</p>
+      <span>✦ &nbsp;✧ &nbsp;✦</span>
+    </section>
+  </main>
+
+  <footer><span>tripmate.ai</span><span>Thoughtful travel starts here.</span></footer>
+  <script src="/static/script.js" defer></script>
+</body>
+</html>
