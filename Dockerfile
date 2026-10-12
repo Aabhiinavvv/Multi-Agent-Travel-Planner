@@ -12,9 +12,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-
-RUN pip install --no--cache-dir --upgrade zip
-RUN pip install --no--cache--dir -r requirements.txt
+RUN python -m pip install --upgrade pip
+RUN python -m pip install --upgrade zip
+RUN python -m pip install -r requirements.txt
 
 COPY . . 
 

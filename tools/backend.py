@@ -12,6 +12,7 @@ import operator
 import uuid
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 
 from langgraph.graph import StateGraph, START , END
 from langgraph.checkpoint.postgres import PostgresSaver 
@@ -191,13 +192,20 @@ graph.add_edge("final_agent",END)
 
 DATABASE_URL = get_database_url()
 
-_conn = psycopg.connect(
+connection_pool = ConnectionPool(
     DATABASE_URL,
-    autocommit=True,
-    row_factory = dict_row
+    min_size=1,
+    max_size=5,
+    kwargs={
+        "autocommit": True,
+        "row_factory": dict_row,
+        "prepare_threshold": 0,
+    },
+    check=ConnectionPool.check_connection,
+    open=True,
 )
 
-checkpointer = PostgresSaver(_conn)
+checkpointer = PostgresSaver(connection_pool)
 checkpointer.setup()
 
 travel_graph = graph.compile(checkpointer= checkpointer)
@@ -239,5 +247,4 @@ def run_travel_agent(user_input:str, thread_id:str | None=None):
         "itinerary":result.get("itinerary",""),
         "llm_calls":result.get("llm_calls",0),
     }
-
 
