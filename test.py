@@ -1,20 +1,7 @@
-from tools.tavily_tool import tavily_search
-from tools.flight_tool import search_flights
-res = search_flights("plan a 7 days nepal trip from bangladesh ")
-from tools.backend import run_travel_agent
+import asyncio
+from mcp_client_test import get_all_tools
 
-#res = run_travel_agent
+if __name__ == "__main__":
+    asyncio.run(get_all_tools())
 
-
-
-#print(res)
-
-
-user_input = input("enter ypur inout")
-response = run_travel_agent(
-    user_input = user_input,
-
-)
-
-print("\n final response :\n")
-print(response['answer'])
+    

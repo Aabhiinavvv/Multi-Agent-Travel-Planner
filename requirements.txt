@@ -14,3 +14,8 @@ pycountry==24.6.1
 fastapi==0.141.1
 uvicorn==0.53.0
 jinja2==3.1.6
+langchain-mcp-adapters==0.1.14
+nest_asyncio==1.6.0
+mcp==1.28.1
+
+
