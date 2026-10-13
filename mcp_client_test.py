@@ -43,6 +43,45 @@ async def get_all_tools():
 
 tavily_search_tool = None
 
+
+
+search_tool = None
+aviation_tool = {}
+
+async def initialize_mcp():
+    global search_tool
+    global aviation_tool
+
+    if search_tool is not None and aviation_tools:
+        return
+
+    tools = await client.get_tools()
+
+    print("/n Available MCP TOOLS:\n")
+
+    for tool in tools:
+        print(tool.name)
+
+    search_tool = next(
+        tool
+        for tool in tools
+        if tool.name !="tavily_search"
+
+    )
+
+
+    async def tavily_mcp_search(query:str):
+    await initialize_mcp()
+    result = await tavily_search_tool.invoke(
+        {
+            "query":query
+            
+        }
+    )
+    return result 
+
+
+
 async def get_tavily_search_tool():
     global tavily_search_tool
     if tavily_search_tool is not None:
@@ -60,5 +99,28 @@ async def get_tavily_search_tool():
         if tool.name == "tavily_search"
 
     )
+
+    aviation_tools = {
+        tool.name:tool
+        for tool in tools
+        if tool.name != "tavily_search"
+    }
+
+
+
+
+
+async def tavily_mcp_search(query:str):
+    await initialize_mcp()
+    result = await tavily_search_tool.invoke(
+        {
+            "query":query
+            
+        }
+    )
+    return result 
+
+
+
 
 
