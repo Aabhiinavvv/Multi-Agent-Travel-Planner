@@ -287,6 +287,13 @@ Organize the response into these sections:
 5. Estimated Budget
 6. Final Recommendations
 
+
+Important:
+- Be clear and practical
+-Mention that live flight API way not provide ticket prices if pricing is unavailable
+- Including weather-based travel advice
+- Keep the response useful for real travel planning 
+
 Requirements:
 - Be clear, practical and easy to understand.
 - Do not invent flight availability or hotel prices.
@@ -383,6 +390,7 @@ def run_travel_agent(
         "user_query": user_input,
         "flight_results": "",
         "hotel_results": "",
+        "weather_results": "",
         "itinerary": "",
         "final_answer": "",
         "llm_calls": 0,
@@ -398,6 +406,9 @@ def run_travel_agent(
         "answer": result.get("final_answer", ""),
         "flight_results": result.get("flight_results", ""),
         "hotel_results": result.get("hotel_results", ""),
+        "weather_results": result.get("weather_results"),
         "itinerary": result.get("itinerary", ""),
         "llm_calls": result.get("llm_calls", 0),
     }
+
+
