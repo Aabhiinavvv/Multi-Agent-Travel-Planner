@@ -200,6 +200,7 @@ async def tavily_mcp_search(query: str):
 # ==========================================
 
 aviation_tools = {}
+weather_tools = {}
 
 
 async def initialize_aviation_tools():
@@ -226,18 +227,25 @@ async def initialize_aviation_tools():
         )
 
 
-
-
 async def aviation_mcp_call(
-        tool_name :str,
-        tool_args: dict = None
+    tool_name: str,
+    tool_args: dict = None
 ):
-    tools = await client.get_tools
+    await initialize_aviation_tools()
 
-    tool = next(
-        t for t in tools
-        if t.name == tool_name
-    )
+    tool = aviation_tools.get(tool_name)
+
+    if tool is None:
+        available_tools = ", ".join(
+            sorted(aviation_tools.keys())
+        )
+
+        raise ValueError(
+            f"AviationStack tool '{tool_name}' "
+            "was not found. "
+            f"Available tools: "
+            f"{available_tools or 'none'}"
+        )
 
     result = await tool.ainvoke(
         tool_args or {}
@@ -246,6 +254,43 @@ async def aviation_mcp_call(
     return result
 
 
+async def initialize_weather_tools():
+    global weather_tools
+
+    if weather_tools:
+        return
+
+    tools = await client.get_tools(
+        server_name="weather"
+    )
+
+    weather_tools = {
+        tool.name: tool
+        for tool in tools
+    }
+
+    if not weather_tools:
+        raise RuntimeError(
+            "Weather MCP connected but returned no tools."
+        )
 
 
+async def weather_mcp_call(
+    tool_name: str,
+    tool_args: dict = None
+):
+    await initialize_weather_tools()
 
+    tool = weather_tools.get(tool_name)
+
+    if tool is None:
+        available_tools = ", ".join(
+            sorted(weather_tools.keys())
+        )
+
+        raise ValueError(
+            f"Weather tool '{tool_name}' was not found. "
+            f"Available tools: {available_tools or 'none'}"
+        )
+
+    return await tool.ainvoke(tool_args or {})

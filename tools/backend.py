@@ -23,9 +23,11 @@ from langchain_core.messages import (
 
 from langchain_groq import ChatGroq
 
-from tools.tavily_tool import tavily_search
-from mcp_client import aviation_mcp_call
-
+from mcp_client import (
+    aviation_mcp_call,
+    tavily_mcp_search,
+    weather_mcp_call,
+)
 
 # ==========================================
 # 1. ENVIRONMENT CONFIGURATION
@@ -79,6 +81,7 @@ class TravelState(TypedDict):
     user_query: str
     flight_results: str
     hotel_results: str
+    weather_results: str
     itinerary: str
     final_answer: str
     llm_calls: int
@@ -187,7 +190,9 @@ def hotel_agent(state: TravelState):
     )
 
     try:
-        hotel_data = tavily_search(query)
+        hotel_data = asyncio.run(
+            tavily_mcp_search(query)
+        )
 
         return {
             "hotel_results": str(hotel_data),
@@ -215,7 +220,69 @@ def hotel_agent(state: TravelState):
 
 
 # ==========================================
-# 6. ITINERARY AGENT
+# 6. WEATHER AGENT
+# ==========================================
+
+def weather_agent(state: TravelState):
+    print("\nInside Weather Agent")
+
+    location_response = llm.invoke([
+        SystemMessage(
+            content=(
+                "Extract the primary destination city and country "
+                "from the user's travel request. Reply only with "
+                "'City, Country', or UNKNOWN if no destination is stated."
+            )
+        ),
+        HumanMessage(content=state["user_query"]),
+    ])
+    llm_calls = state.get("llm_calls", 0) + 1
+    location = str(location_response.content).strip().strip("\"'")
+
+    if not location or location.upper() == "UNKNOWN":
+        return {
+            "weather_results": (
+                "Weather forecast unavailable: no destination was specified."
+            ),
+            "messages": [location_response],
+            "llm_calls": llm_calls,
+        }
+
+    try:
+        weather_data = asyncio.run(
+            weather_mcp_call(
+                "get_weather_forecast",
+                {"location": location},
+            )
+        )
+
+        return {
+            "weather_results": str(weather_data),
+            "messages": [
+                location_response,
+                AIMessage(content="Weather forecast retrieved."),
+            ],
+            "llm_calls": llm_calls,
+        }
+
+    except Exception as e:
+        print("Weather Agent Error:", repr(e))
+
+        return {
+            "weather_results": (
+                "Weather forecast unavailable. "
+                "Reason: " + str(e)
+            ),
+            "messages": [
+                location_response,
+                AIMessage(content="Weather forecast retrieval failed."),
+            ],
+            "llm_calls": llm_calls,
+        }
+
+
+# ==========================================
+# 7. ITINERARY AGENT
 # ==========================================
 
 def itinerary_agent(state: TravelState):
@@ -233,11 +300,15 @@ Flight Results:
 Hotel Results:
 {state['hotel_results']}
 
+Weather Results:
+{state['weather_results']}
+
 Requirements:
 - Make the itinerary practical and easy to follow.
 - Respect the user's stated budget.
 - Organize the plan day by day.
 - Consider travel time and geographical distance.
+- Use weather results only for the dates covered by the forecast.
 - Clearly label estimates and missing information.
 - Do not invent confirmed bookings or live prices.
 """
@@ -257,7 +328,7 @@ Requirements:
 
 
 # ==========================================
-# 7. FINAL RESPONSE AGENT
+# 8. FINAL RESPONSE AGENT
 # ==========================================
 
 def final_agent(state: TravelState):
@@ -275,6 +346,9 @@ Flights:
 Hotels:
 {state['hotel_results']}
 
+Weather:
+{state['weather_results']}
+
 Itinerary:
 {state['itinerary']}
 
@@ -290,8 +364,8 @@ Organize the response into these sections:
 
 Important:
 - Be clear and practical
--Mention that live flight API way not provide ticket prices if pricing is unavailable
-- Including weather-based travel advice
+- Mention that live flight API may not provide ticket prices if pricing is unavailable.
+- Do not invent weather conditions. State that a live forecast was not retrieved when weather data is unavailable.
 - Keep the response useful for real travel planning 
 
 Requirements:
@@ -319,25 +393,27 @@ Requirements:
 
 
 # ==========================================
-# 8. BUILD LANGGRAPH WORKFLOW
+# 9. BUILD LANGGRAPH WORKFLOW
 # ==========================================
 
 graph = StateGraph(TravelState)
 
 graph.add_node("flight_agent", flight_agent)
 graph.add_node("hotel_agent", hotel_agent)
+graph.add_node("weather_agent", weather_agent)
 graph.add_node("itinerary_agent", itinerary_agent)
 graph.add_node("final_agent", final_agent)
 
 graph.add_edge(START, "flight_agent")
 graph.add_edge("flight_agent", "hotel_agent")
-graph.add_edge("hotel_agent", "itinerary_agent")
+graph.add_edge("hotel_agent", "weather_agent")
+graph.add_edge("weather_agent", "itinerary_agent")
 graph.add_edge("itinerary_agent", "final_agent")
 graph.add_edge("final_agent", END)
 
 
 # ==========================================
-# 9. POSTGRESQL CHECKPOINTER
+# 10. POSTGRESQL CHECKPOINTER
 # ==========================================
 
 DATABASE_URL = get_database_url()
@@ -364,7 +440,7 @@ travel_graph = graph.compile(
 
 
 # ==========================================
-# 10. FUNCTION CALLED BY FASTAPI
+# 11. FUNCTION CALLED BY FASTAPI
 # ==========================================
 
 def run_travel_agent(
@@ -410,5 +486,3 @@ def run_travel_agent(
         "itinerary": result.get("itinerary", ""),
         "llm_calls": result.get("llm_calls", 0),
     }
-
-

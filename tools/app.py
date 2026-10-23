@@ -68,6 +68,7 @@ def travel_planner(request_data: TravelRequest):
                 "answer": result["answer"],
                 "flight_results": result["flight_results"],
                 "hotel_results": result["hotel_results"],
+                "weather_results": result["weather_results"],
                 "itinerary": result["itinerary"],
                 "llm_calls": result["llm_calls"]
             }
