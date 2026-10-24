@@ -1,3 +1,4 @@
+
 import os
 import sys
 from pathlib import Path
@@ -12,33 +13,57 @@ from langchain_groq import ChatGroq
 # Environment configuration
 # ==========================================
 
+load_dotenv()
+
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
-
-load_dotenv()
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 AVIATION_STACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+if not TAVILY_API_KEY:
+    raise ValueError("TAVILY_API_KEY missing from .env")
 
-# Automatically find the current project folder.
-# This replaces the hard-coded Windows paths.
+if not AVIATION_STACK_API_KEY:
+    raise ValueError("AVIATIONSTACK_API_KEY missing from .env")
+
+if not OPENWEATHER_API_KEY:
+    raise ValueError("OPENWEATHER_API_KEY missing from .env")
+
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY missing from .env")
+
+
+# ==========================================
+# Weather server path
+# ==========================================
+
 PROJECT_DIR = Path(__file__).resolve().parent
-WEATHER_SERVER_PATH = PROJECT_DIR / "custom_weather_mcp_server.py"
+
+WEATHER_SERVER_PATH = (
+    PROJECT_DIR / "custom_weather_mcp_server.py"
+)
+
+if not WEATHER_SERVER_PATH.is_file():
+    raise FileNotFoundError(
+        f"Weather MCP server not found: {WEATHER_SERVER_PATH}"
+    )
 
 
-# Preserve the complete Windows environment when starting
-# local stdio MCP servers.
+# ==========================================
+# MCP server environment variables
+# ==========================================
+
 AVIATION_ENV = os.environ.copy()
 AVIATION_ENV["AVIATION_STACK_API_KEY"] = (
-    AVIATION_STACK_API_KEY or ""
+    AVIATION_STACK_API_KEY
 )
 
 WEATHER_ENV = os.environ.copy()
 WEATHER_ENV["OPENWEATHER_API_KEY"] = (
-    OPENWEATHER_API_KEY or ""
+    OPENWEATHER_API_KEY
 )
 
 
@@ -47,8 +72,8 @@ WEATHER_ENV["OPENWEATHER_API_KEY"] = (
 # ==========================================
 
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=GROQ_API_KEY
+    model="openai/gpt-oss-120b",
+    api_key=GROQ_API_KEY,
 )
 
 
@@ -63,7 +88,7 @@ client = MultiServerMCPClient(
             "url": (
                 "https://mcp.tavily.com/mcp/"
                 f"?tavilyApiKey={TAVILY_API_KEY}"
-            )
+            ),
         },
 
         "aviationstack": {
@@ -72,25 +97,20 @@ client = MultiServerMCPClient(
             "args": [
                 "aviationstack-mcp"
             ],
-            "env": AVIATION_ENV
+            "env": AVIATION_ENV,
         },
 
         "weather": {
             "transport": "stdio",
-
-            # Use the same Python environment that runs app.py.
             "command": sys.executable,
-
-            # Automatically use custom_weather_mcp_server.py
-            # from the current project directory.
             "args": [
                 str(WEATHER_SERVER_PATH)
             ],
-
-            "env": WEATHER_ENV
-        }
+            "env": WEATHER_ENV,
+        },
     }
 )
+
 
 
 # ==========================================
