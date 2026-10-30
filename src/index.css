@@ -1,0 +1,148 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #07111f;
+    color: #f1f5f9;
+  }
+  
+  h1, h2, h3, h4, .font-heading {
+    font-family: 'DM Sans', 'Manrope', sans-serif;
+  }
+}
+
+/* Glassmorphism and gradient background effects */
+.page-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.14), transparent 35%),
+    radial-gradient(circle at top right, rgba(168, 85, 247, 0.14), transparent 30%),
+    radial-gradient(circle at bottom center, rgba(20, 184, 166, 0.12), transparent 40%),
+    linear-gradient(135deg, #07111f 0%, #0c1729 45%, #0f1c2e 100%);
+}
+
+.gradient-circle {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(80px);
+  pointer-events: none;
+  opacity: 0.35;
+}
+
+.circle-1 {
+  width: 380px;
+  height: 380px;
+  background: #2563eb;
+  top: 5%;
+  left: 5%;
+}
+
+.circle-2 {
+  width: 320px;
+  height: 320px;
+  background: #9333ea;
+  top: 15%;
+  right: 8%;
+}
+
+.circle-3 {
+  width: 300px;
+  height: 300px;
+  background: #14b8a6;
+  bottom: 10%;
+  left: 30%;
+}
+
+/* Markdown styling inside plan */
+.prose-custom h1 {
+  font-size: 1.85rem;
+  font-weight: 700;
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+  color: #ffffff;
+  letter-spacing: -0.025em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0.5rem;
+}
+
+.prose-custom h2 {
+  font-size: 1.45rem;
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+  color: #38bdf8;
+  letter-spacing: -0.02em;
+}
+
+.prose-custom h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+  margin-bottom: 0.4rem;
+  color: #c084fc;
+}
+
+.prose-custom p {
+  margin-top: 0.6rem;
+  margin-bottom: 0.6rem;
+  line-height: 1.7;
+  color: #cbd5e1;
+}
+
+.prose-custom ul {
+  list-style-type: disc;
+  margin-left: 1.5rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.75rem;
+  color: #cbd5e1;
+}
+
+.prose-custom li {
+  margin-bottom: 0.35rem;
+  line-height: 1.6;
+}
+
+.prose-custom strong {
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.prose-custom blockquote {
+  border-left: 3px solid #14b8a6;
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: #94a3b8;
+  font-style: italic;
+  background: rgba(20, 184, 166, 0.05);
+  border-radius: 0 0.5rem 0.5rem 0;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.prose-custom hr {
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 1.5rem 0;
+}
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .page-bg, .gradient-circle {
+    display: none !important;
+  }
+  .prose-custom p, .prose-custom li, .prose-custom strong {
+    color: #111827 !important;
+  }
+  .prose-custom h1, .prose-custom h2, .prose-custom h3 {
+    color: #0f172a !important;
+  }
+}
