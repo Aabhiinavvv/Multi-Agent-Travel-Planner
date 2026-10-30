@@ -7,6 +7,7 @@ import certifi
 from dotenv import load_dotenv
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_groq import ChatGroq
+from langchain_core.messages import HumanMessage, SystemMessage
 
 
 # ==========================================
@@ -314,3 +315,34 @@ async def weather_mcp_call(
         )
 
     return await tool.ainvoke(tool_args or {})
+
+
+def extract_destination(query: str) -> str:
+    response = llm.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "Extract the travel destination city from the user's "
+                    "request. Return only the city name, or an empty string "
+                    "if no destination is specified."
+                )
+            ),
+            HumanMessage(content=query),
+        ]
+    )
+
+    return str(response.content).strip()
+
+
+async def weather_mcp_search(city: str):
+    return await weather_mcp_call(
+        "get_current_weather",
+        {"city": city},
+    )
+
+
+async def forecast_mcp_search(city: str):
+    return await weather_mcp_call(
+        "get_forecast",
+        {"city": city},
+    )

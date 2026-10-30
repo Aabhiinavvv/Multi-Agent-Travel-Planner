@@ -720,16 +720,23 @@ graph.add_edge("guardrail_blocked", END)
 # =========================
 # PostgreSQL Checkpointer - original persistence kept
 # =========================
-DATABASE_URL = get_database_url()
-_conn = psycopg.connect(
-    DATABASE_URL,
-    autocommit=True,
-    row_factory=dict_row,
-)
-checkpointer = PostgresSaver(_conn)
-checkpointer.setup()
+travel_graph = None
 
-travel_graph = graph.compile(checkpointer=checkpointer)
+
+def _get_travel_graph():
+    global travel_graph
+
+    if travel_graph is None:
+        connection = psycopg.connect(
+            get_database_url(),
+            autocommit=True,
+            row_factory=dict_row,
+        )
+        checkpointer = PostgresSaver(connection)
+        checkpointer.setup()
+        travel_graph = graph.compile(checkpointer=checkpointer)
+
+    return travel_graph
 
 
 # =========================
@@ -795,7 +802,7 @@ def run_travel_agent(user_input: str, thread_id: str | None = None):
 
     config = {"configurable": {"thread_id": thread_id}}
 
-    result = travel_graph.invoke(
+    result = _get_travel_graph().invoke(
         {
             "messages": [HumanMessage(content=user_input)],
             "user_query": user_input,
@@ -831,7 +838,7 @@ def resume_travel_agent(
         raise ValueError("thread_id is required to resume a travel plan.")
 
     config = {"configurable": {"thread_id": thread_id}}
-    result = travel_graph.invoke(
+    result = _get_travel_graph().invoke(
         Command(
             resume={
                 "approved": approved,
