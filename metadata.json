@@ -1,0 +1,6 @@
+{
+  "name": "TripMate AI - Multi-Agent Travel Planner",
+  "description": "Multi-agent travel planning platform with supervisor routing, guardrails, flight/hotel/weather/budget specialists, human-in-the-loop approval, and day-by-day itineraries.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
