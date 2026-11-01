@@ -192,7 +192,7 @@ def extract_destination(query: str) -> str:
 
     candidate = match.group(1).strip(" \t,.;:!?")
     candidate = re.split(
-        r"\s+(?:from|for|during|between|with|under|within|starting|"
+        r"\s+(?:from|for|during|between|with|under|within|in|starting|"
         r"departing|leaving|on|next)\b|[,;.!?]",
         candidate,
         maxsplit=1,
