@@ -1,4 +1,4 @@
-name: Verify travel planner
+name: Verify TripMate applications
 
 on:
   push:
@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  typescript-build:
-    name: TypeScript build
+  typescript:
+    name: TypeScript build and runtime smoke tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,15 +20,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - name: Smoke-test API draft and approval flow (fallback mode)
+      - name: Type-check, build frontend and compile production server
+        run: npm run build
+      - name: Smoke-test development API and approval flow without API keys
         run: |
-          npm run dev > /tmp/tripmate-server.log 2>&1 &
+          npm run dev > /tmp/tripmate-dev.log 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:3000/health > /tmp/tripmate-health.json; then
+            if curl --fail --silent http://127.0.0.1:3000/health > /dev/null; then
               break
             fi
             sleep 2
@@ -38,9 +39,8 @@ jobs:
           import assert from 'node:assert/strict';
 
           const health = await fetch('http://127.0.0.1:3000/health');
-          assert.equal(health.status, 200, 'health endpoint should return HTTP 200');
-          const healthData = await health.json();
-          assert.equal(healthData.status, 'ok');
+          assert.equal(health.status, 200);
+          assert.equal((await health.json()).status, 'ok');
 
           const draftResponse = await fetch('http://127.0.0.1:3000/api/travel', {
             method: 'POST',
@@ -49,11 +49,11 @@ jobs:
               message: 'Plan a 5-day trip to Tokyo from Delhi for two people with a moderate budget.'
             })
           });
-          assert.equal(draftResponse.status, 200, 'draft endpoint should return HTTP 200');
+          assert.equal(draftResponse.status, 200);
           const draft = await draftResponse.json();
           assert.equal(draft.success, true);
           assert.equal(draft.requires_approval, true);
-          assert.ok(draft.thread_id, 'draft should include a thread_id');
+          assert.ok(draft.thread_id);
           assert.ok(draft.selected_agents.includes('flight_agent'));
           assert.ok(draft.selected_agents.includes('hotel_agent'));
 
@@ -66,70 +66,72 @@ jobs:
               feedback: ''
             })
           });
-          assert.equal(approvalResponse.status, 200, 'approval endpoint should return HTTP 200');
+          assert.equal(approvalResponse.status, 200);
           const finalPlan = await approvalResponse.json();
           assert.equal(finalPlan.success, true);
           assert.equal(finalPlan.requires_approval, false);
-          assert.ok(finalPlan.answer, 'final response should not be empty');
+          assert.ok(finalPlan.answer);
 
-          console.log('PASS: health, travel draft, specialist selection, and approval/finalization flow.');
+          console.log('PASS: development health, draft, agents and approval flow.');
+          NODE
+      - name: Smoke-test compiled production Node server
+        run: |
+          NODE_ENV=production PORT=3101 npm start > /tmp/tripmate-production.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3101/health > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+
+          const health = await fetch('http://127.0.0.1:3101/health');
+          assert.equal(health.status, 200);
+          assert.equal((await health.json()).status, 'ok');
+
+          const home = await fetch('http://127.0.0.1:3101/');
+          assert.equal(home.status, 200);
+          assert.match(home.headers.get('content-type') || '', /text\/html/);
+          const html = await home.text();
+          assert.match(html, /TripMate|root/i);
+
+          console.log('PASS: compiled production server serves health and frontend.');
           NODE
 
-  python-static-checks:
-    name: Python syntax and integration checks
+  python:
+    name: Python syntax, imports and LangGraph HITL tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile Python files
-        run: python -m compileall -q tools mcp_client.py custom_weather_mcp_server.py mcp_client_test.py test.py
-      - name: Check recovered backend wiring
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install Python dependencies
         run: |
-          python - <<'PY'
-          import ast
-          import pathlib
-          import sys
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Compile Python files
+        run: python -m compileall -q tools mcp_client.py custom_weather_mcp_server.py mcp_client_test.py test.py tests
+      - name: Run Python regression tests
+        run: pytest -q tests
 
-          root = pathlib.Path.cwd()
-          backend = ast.parse((root / "tools/backend.py").read_text())
-          client = ast.parse((root / "mcp_client.py").read_text())
-          app = ast.parse((root / "tools/app.py").read_text())
-
-          defined = {
-              node.name for node in client.body
-              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-          }
-          imported = set()
-          for node in backend.body:
-              if isinstance(node, ast.ImportFrom) and node.module == "mcp_client":
-                  imported.update(alias.name for alias in node.names)
-
-          missing = sorted(imported - defined)
-          app_imports_backend_as_top_level = any(
-              isinstance(node, ast.ImportFrom) and node.module == "backend"
-              for node in app.body
-          )
-          missing_static = not (root / "tools/static").exists()
-          missing_templates = not (root / "tools/templates").exists()
-
-          print("Undefined backend MCP imports:", missing)
-          print("FastAPI uses top-level 'backend' import:", app_imports_backend_as_top_level)
-          print("tools/static absent:", missing_static)
-          print("tools/templates absent:", missing_templates)
-
-          failures = []
-          if missing:
-              failures.append("mcp_client.py is missing: " + ", ".join(missing))
-          if app_imports_backend_as_top_level:
-              failures.append("tools/app.py should import from its backend package")
-          if missing_static or missing_templates:
-              failures.append("FastAPI resolves static/templates to a directory that does not exist")
-
-          if failures:
-              print("\n::warning::Python integration issues remain:")
-              for failure in failures:
-                  print("::warning::" + failure)
-              print("Python syntax passed; integration diagnostics are advisory until the recovered Python wiring is fixed.")
-          PY
+  docker:
+    name: Build deployment images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build primary TypeScript image
+        run: docker build -t tripmate-typescript:ci .
+      - name: Build optional Python image
+        run: docker build -f Dockerfile.python -t tripmate-python:ci .
