@@ -176,10 +176,10 @@ def extract_destination(query: str) -> str:
         return ""
 
     patterns = (
-        r"\\bfrom\\s+.+?\\s+to\\s+(.+)$",
-        r"\\b(?:destination\\s*(?:is|:)|trip\\s+to|travel\\s+to|"
-        r"travelling\\s+to|traveling\\s+to|visit|visiting|explore|to)\\s+(.+)$",
-        r"\\b(?:trip|travel|vacation|holiday|stay)\\s+in\\s+(.+)$",
+        r"\bfrom\s+.+?\s+to\s+(.+)$",
+        r"\b(?:destination\s*(?:is|:)|trip\s+to|travel\s+to|"
+        r"travelling\s+to|traveling\s+to|visit|visiting|explore|to)\s+(.+)$",
+        r"\b(?:trip|travel|vacation|holiday|stay)\s+in\s+(.+)$",
     )
     match = None
     for pattern in patterns:
@@ -190,15 +190,20 @@ def extract_destination(query: str) -> str:
     if not match:
         return ""
 
-    candidate = match.group(1).strip(" \\t,.;:!?")
+    candidate = match.group(1).strip(" \t,.;:!?")
     candidate = re.split(
-        r"\\s+(?:from|for|during|between|with|under|within|starting|"
-        r"departing|leaving|on|next)\\b|[,;.!?]",
+        r"\s+(?:from|for|during|between|with|under|within|starting|"
+        r"departing|leaving|on|next)\b|[,;.!?]",
         candidate,
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
-    candidate = re.sub(r"^(?:the city of|city of)\\s+", "", candidate, flags=re.IGNORECASE)
+    candidate = re.sub(
+        r"^(?:the city of|city of)\s+",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    )
     return candidate.strip()
 
 
