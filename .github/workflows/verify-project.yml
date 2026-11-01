@@ -1,0 +1,91 @@
+name: Project verification
+
+on:
+  push:
+    branches:
+      - diagnostics-run-check
+
+permissions:
+  contents: read
+
+jobs:
+  typescript-build:
+    name: TypeScript production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  python-checks:
+    name: Python syntax and wiring checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile Python files
+        run: python -m compileall -q tools mcp_client.py custom_weather_mcp_server.py mcp_client_test.py test.py
+      - name: Check backend imports and FastAPI paths
+        run: |
+          python - <<'PY'
+          import ast
+          import pathlib
+          import sys
+
+          root = pathlib.Path.cwd()
+          backend = ast.parse((root / "tools/backend.py").read_text())
+          client = ast.parse((root / "mcp_client.py").read_text())
+          app = ast.parse((root / "tools/app.py").read_text())
+
+          defined = {
+              node.name for node in client.body
+              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+          }
+          imported = set()
+          for node in backend.body:
+              if isinstance(node, ast.ImportFrom) and node.module == "mcp_client":
+                  imported.update(alias.name for alias in node.names)
+
+          missing = sorted(imported - defined)
+          print("MCP helper imports:", sorted(imported))
+          print("Missing MCP helpers:", missing)
+
+          app_imports_backend_as_top_level = any(
+              isinstance(node, ast.ImportFrom) and node.module == "backend"
+              for node in app.body
+          )
+          base_dir_is_tools = any(
+              isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "BASE_DIR" for target in node.targets)
+              and "parent" in ast.dump(node.value)
+              for node in app.body
+          )
+          missing_static = not (root / "tools/static").exists()
+          missing_templates = not (root / "tools/templates").exists()
+
+          print("FastAPI imports backend as top-level module:", app_imports_backend_as_top_level)
+          print("tools/static missing:", missing_static)
+          print("tools/templates missing:", missing_templates)
+
+          problems = []
+          if missing:
+              problems.append("backend imports undefined MCP helpers: " + ", ".join(missing))
+          if app_imports_backend_as_top_level:
+              problems.append("tools/app.py imports 'backend' instead of the package-relative '.backend'")
+          if missing_static or missing_templates:
+              problems.append("tools/app.py resolves static/templates under tools/, but both directories are at repository root")
+
+          if problems:
+              print("\nPYTHON WIRING FAILURES:")
+              for problem in problems:
+                  print("- " + problem)
+              sys.exit(1)
+
+          print("Python wiring checks passed.")
+          PY
