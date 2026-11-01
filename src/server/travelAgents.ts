@@ -19,7 +19,7 @@ interface StoredTripSession {
 const sessions = new Map<string, StoredTripSession>();
 
 function getApiKey(): string | undefined {
-  return process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+  return process.env.GEMINI_API_KEY;
 }
 
 function getGeminiClient(): GoogleGenAI | null {

@@ -7,15 +7,19 @@ load_dotenv()
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-from typing import Any, TypedDict, Annotated
 import operator
 import uuid
 import asyncio
 import json
+import threading
+from typing import Any, TypedDict, Annotated
+
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, interrupt
 from langchain_core.messages import (
     AnyMessage,
@@ -35,14 +39,11 @@ from mcp_client import (
 )
 
 
-def get_database_url():
-    database_url = os.getenv("DATABASE_URL")
-
+def get_database_url() -> str | None:
+    """Return the optional PostgreSQL URL; None selects in-memory dev storage."""
+    database_url = os.getenv("DATABASE_URL", "").strip()
     if not database_url:
-        raise ValueError(
-            "DATABASE_URL is missing. "
-            "Please add your Render PostgreSQL External Database URL to .env"
-        )
+        return None
 
     if "sslmode=" not in database_url:
         separator = "&" if "?" in database_url else "?"
@@ -51,18 +52,24 @@ def get_database_url():
     return database_url
 
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+_llm_instance: ChatGroq | None = None
 
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY is missing. Please add it to your .env file.")
 
-# =========================
-# LLM - original model kept
-# =========================
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=GROQ_API_KEY,
-)
+def _get_llm() -> ChatGroq:
+    """Create the Groq chat model on first use, not during module import."""
+    global _llm_instance
+    if _llm_instance is None:
+        api_key = os.getenv("GROQ_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY is missing. Add it to the project .env file "
+                "or set it in your environment before requesting a travel plan."
+            )
+        _llm_instance = ChatGroq(
+            model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+            api_key=api_key,
+        )
+    return _llm_instance
 
 # =========================
 # State - original fields kept, new control fields added
@@ -115,7 +122,7 @@ AGENT_ORDER = [
 
 
 def _llm_text(system_prompt: str, user_prompt: str) -> str:
-    response = llm.invoke(
+    response = _get_llm().invoke(
         [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
@@ -337,7 +344,7 @@ def flight_agent(state: TravelState):
             airline_data=str(airlines)[:3000],
         )
 
-        response = llm.invoke(
+        response = _get_llm().invoke(
             [
                 SystemMessage(content="You are an expert travel flight planner."),
                 HumanMessage(content=prompt),
@@ -399,9 +406,12 @@ def hotel_agent(state: TravelState):
 # Weather Agent - original behavior kept
 # =========================
 def weather_agent(state: TravelState):
-    city = extract_destination(
-        state["user_query"]
-    )
+    constraints = state.get("trip_constraints", {})
+    city = str(
+        (constraints or {}).get("destination")
+        or extract_destination(state["user_query"])
+        or ""
+    ).strip()
 
     try:
         weather_data = asyncio.run(
@@ -475,7 +485,7 @@ Return:
 If exact live prices are unavailable, clearly label estimates as approximate.
 """
 
-    response = llm.invoke(
+    response = _get_llm().invoke(
         [
             SystemMessage(content="You are a practical travel budget analyst."),
             HumanMessage(content=prompt),
@@ -518,7 +528,7 @@ Make the itinerary practical, budget-aware, and easy to follow.
 Create a clear draft that is ready for human review.
 """
 
-    response = llm.invoke(
+    response = _get_llm().invoke(
         [
             SystemMessage(content="You are an expert travel planner."),
             HumanMessage(content=prompt),
@@ -625,7 +635,7 @@ Important:
 - Incorporate the human feedback when revision was requested.
 """
 
-    response = llm.invoke(
+    response = _get_llm().invoke(
         [
             SystemMessage(
                 content="You are a professional AI travel booking assistant."
@@ -718,18 +728,64 @@ graph.add_edge("final_agent", END)
 graph.add_edge("guardrail_blocked", END)
 
 # =========================
-# PostgreSQL Checkpointer - original persistence kept
+# Lazy graph + checkpoint storage
 # =========================
-DATABASE_URL = get_database_url()
-_conn = psycopg.connect(
-    DATABASE_URL,
-    autocommit=True,
-    row_factory=dict_row,
-)
-checkpointer = PostgresSaver(_conn)
-checkpointer.setup()
+_travel_graph = None
+_db_pool: ConnectionPool | None = None
+_graph_lock = threading.Lock()
 
-travel_graph = graph.compile(checkpointer=checkpointer)
+
+def get_travel_graph():
+    """Compile the workflow once, connecting to PostgreSQL only when configured.
+
+    PostgreSQL provides durable HITL sessions across restarts. When DATABASE_URL
+    is omitted, MemorySaver keeps local development and tests usable, but active
+    approval sessions live only for the lifetime of this Python process.
+    """
+    global _travel_graph, _db_pool
+
+    if _travel_graph is not None:
+        return _travel_graph
+
+    with _graph_lock:
+        if _travel_graph is not None:
+            return _travel_graph
+
+        database_url = get_database_url()
+        if database_url:
+            _db_pool = ConnectionPool(
+                conninfo=database_url,
+                min_size=1,
+                max_size=5,
+                kwargs={
+                    "autocommit": True,
+                    "row_factory": dict_row,
+                    "prepare_threshold": 0,
+                },
+                check=ConnectionPool.check_connection,
+                open=True,
+            )
+            checkpointer = PostgresSaver(_db_pool)
+            checkpointer.setup()
+            print("LangGraph checkpointing: PostgreSQL")
+        else:
+            checkpointer = MemorySaver()
+            print(
+                "WARNING: DATABASE_URL is not configured. "
+                "Using in-memory checkpoints; approval sessions are not durable."
+            )
+
+        _travel_graph = graph.compile(checkpointer=checkpointer)
+        return _travel_graph
+
+
+def close_resources() -> None:
+    """Close the optional database connection during application shutdown."""
+    global _db_pool, _travel_graph
+    if _db_pool is not None:
+        _db_pool.close()
+        _db_pool = None
+    _travel_graph = None
 
 
 # =========================
@@ -790,12 +846,14 @@ def _serialize_result(
 
 def run_travel_agent(user_input: str, thread_id: str | None = None):
     """Start a new travel-planning run and pause at human approval."""
+    if not user_input or not user_input.strip():
+        raise ValueError("Please enter a travel request.")
     if not thread_id:
         thread_id = f"user_{uuid.uuid4().hex}"
 
     config = {"configurable": {"thread_id": thread_id}}
 
-    result = travel_graph.invoke(
+    result = get_travel_graph().invoke(
         {
             "messages": [HumanMessage(content=user_input)],
             "user_query": user_input,
@@ -831,7 +889,7 @@ def resume_travel_agent(
         raise ValueError("thread_id is required to resume a travel plan.")
 
     config = {"configurable": {"thread_id": thread_id}}
-    result = travel_graph.invoke(
+    result = get_travel_graph().invoke(
         Command(
             resume={
                 "approved": approved,

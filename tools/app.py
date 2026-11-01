@@ -1,3 +1,6 @@
+"""FastAPI entry point for the recovered Python travel-planner workflow."""
+from contextlib import asynccontextmanager
+import os
 from pathlib import Path
 import traceback
 
@@ -8,15 +11,20 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from backend import run_travel_agent, resume_travel_agent
+from .backend import close_resources, resume_travel_agent, run_travel_agent
 
-# This is kept from the original project to allow the existing synchronous
-# agent functions to call async MCP helpers inside FastAPI.
-import nest_asyncio
 
-nest_asyncio.apply()
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = PROJECT_DIR / "static"
+TEMPLATES_DIR = PROJECT_DIR / "templates"
 
-BASE_DIR = Path(__file__).resolve().parent
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Release the optional PostgreSQL connection during shutdown."""
+    yield
+    close_resources()
+
 
 app = FastAPI(
     title="TripMate AI",
@@ -24,20 +32,27 @@ app = FastAPI(
         "LangGraph Multi-Agent Travel Planner with Supervisor, Guardrails, "
         "Human-in-the-Loop, and FastAPI Frontend"
     ),
-    version="2.0.0",
+    version="2.1.0",
+    lifespan=lifespan,
 )
 
-app.mount(
-    "/static",
-    StaticFiles(directory=str(BASE_DIR / "static")),
-    name="static",
-)
+if STATIC_DIR.is_dir():
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(STATIC_DIR)),
+        name="static",
+    )
+else:
+    raise RuntimeError(f"Static assets directory is missing: {STATIC_DIR}")
 
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+if not TEMPLATES_DIR.is_dir():
+    raise RuntimeError(f"Templates directory is missing: {TEMPLATES_DIR}")
+
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
 class TravelRequest(BaseModel):
-    message: str
+    message: str = Field(min_length=1)
     thread_id: str | None = None
 
 
@@ -57,35 +72,24 @@ async def home(request: Request):
 
 
 @app.post("/api/travel")
-async def travel_planner(request_data: TravelRequest):
+def travel_planner(request_data: TravelRequest):
+    """Run the synchronous LangGraph workflow in FastAPI's worker thread."""
+    user_message = request_data.message.strip()
+    if not user_message:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "Message cannot be empty."},
+        )
+
     try:
-        user_message = request_data.message.strip()
-
-        if not user_message:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "success": False,
-                    "error": "Message cannot be empty.",
-                },
-            )
-
         result = run_travel_agent(
             user_input=user_message,
             thread_id=request_data.thread_id,
         )
-
-        return JSONResponse(
-            content={
-                "success": True,
-                **result,
-            }
-        )
-
+        return JSONResponse(content={"success": True, **result})
     except Exception as exc:
-        print("ERROR:", exc)
+        print(f"TRAVEL PLANNER ERROR: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc()
-
         return JSONResponse(
             status_code=500,
             content={
@@ -96,34 +100,27 @@ async def travel_planner(request_data: TravelRequest):
 
 
 @app.post("/api/travel/approve")
-async def approve_travel_plan(request_data: ApprovalRequest):
-    try:
-        if not request_data.approved and not request_data.feedback.strip():
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "success": False,
-                    "error": "Please provide revision feedback when rejecting the draft.",
-                },
-            )
+def approve_travel_plan(request_data: ApprovalRequest):
+    """Resume the persisted LangGraph thread after human review."""
+    if not request_data.approved and not request_data.feedback.strip():
+        return JSONResponse(
+            status_code=400,
+            content={
+                "success": False,
+                "error": "Please provide revision feedback when rejecting the draft.",
+            },
+        )
 
+    try:
         result = resume_travel_agent(
             thread_id=request_data.thread_id,
             approved=request_data.approved,
             feedback=request_data.feedback,
         )
-
-        return JSONResponse(
-            content={
-                "success": True,
-                **result,
-            }
-        )
-
+        return JSONResponse(content={"success": True, **result})
     except Exception as exc:
-        print("APPROVAL ERROR:", exc)
+        print(f"APPROVAL ERROR: {type(exc).__name__}: {exc}", flush=True)
         traceback.print_exc()
-
         return JSONResponse(
             status_code=500,
             content={
@@ -137,10 +134,20 @@ async def approve_travel_plan(request_data: ApprovalRequest):
 async def health_check():
     return {
         "status": "ok",
-        "message": "TripMate AI API is running",
+        "message": "TripMate AI Python API is running",
+        "checkpoint_storage": (
+            "postgresql"
+            if os.getenv("DATABASE_URL")
+            else "in-memory (development only)"
+        ),
         "features": [
             "supervisor_agent",
             "input_guardrail",
+            "flight_agent",
+            "hotel_agent",
+            "weather_agent",
+            "budget_agent",
+            "itinerary_agent",
             "human_in_the_loop",
         ],
     }
@@ -153,11 +160,8 @@ async def favicon():
 
 if __name__ == "__main__":
     uvicorn.run(
-        "app:app",
-        host="127.0.0.1",
-        port=8000,
-        reload=True,
+        "tools.app:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PYTHON_PORT", "8000")),
+        reload=False,
     )
-
-
-    
