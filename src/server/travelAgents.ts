@@ -18,6 +18,26 @@ interface StoredTripSession {
 
 const sessions = new Map<string, StoredTripSession>();
 
+const destinations = [
+  { name: 'India', matches: ['india'] },
+  { name: 'Tokyo, Japan', matches: ['tokyo', 'japan', 'kyoto', 'osaka'] },
+  { name: 'Paris, France', matches: ['paris', 'france', 'nice', 'lyon'] },
+  { name: 'Rome, Italy', matches: ['rome', 'italy', 'florence', 'venice', 'milan'] },
+  { name: 'Bali, Indonesia', matches: ['bali', 'indonesia', 'ubud', 'seminyak'] },
+  { name: 'New York City, USA', matches: ['new york', 'nyc', 'manhattan', 'brooklyn'] },
+  { name: 'London, UK', matches: ['london', 'uk', 'england', 'britain'] },
+  { name: 'Barcelona, Spain', matches: ['barcelona', 'spain', 'madrid', 'seville'] },
+  { name: 'Bangkok, Thailand', matches: ['bangkok', 'thailand', 'phuket', 'chiang mai'] },
+  { name: 'Dubai, UAE', matches: ['dubai', 'uae', 'abu dhabi'] },
+  { name: 'Amsterdam, Netherlands', matches: ['amsterdam', 'netherlands', 'holland'] },
+  { name: 'Sydney, Australia', matches: ['sydney', 'australia', 'melbourne'] },
+  { name: 'Reykjavik, Iceland', matches: ['iceland', 'reykjavik'] },
+  { name: 'Singapore', matches: ['singapore'] },
+  { name: 'Seoul, South Korea', matches: ['seoul', 'korea'] },
+  { name: 'Athens, Greece', matches: ['athens', 'greece', 'santorini', 'mykonos'] },
+  { name: 'Cape Town, South Africa', matches: ['cape town', 'south africa'] },
+];
+
 function getApiKey(): string | undefined {
   return process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 }
@@ -28,37 +48,31 @@ function getGeminiClient(): GoogleGenAI | null {
   return new GoogleGenAI({ apiKey });
 }
 
+function extractRequestedDestination(query: string): string | null {
+  const lower = query.toLowerCase();
+
+  const destinationPatterns = [
+    /\bto\s+(?:the\s+)?([a-z][a-z\s'-]*?)(?=\s+(?:for|during|in|with|on|under|over|from|and|including|starting)\b|[,.;!?]|$)/i,
+    /\b(?:of|around|across|in)\s+(?:the\s+)?([a-z][a-z\s'-]*?)(?=\s+(?:for|during|in|with|on|under|over|from|and|including|starting)\b|[,.;!?]|$)/i,
+  ];
+
+  for (const pattern of destinationPatterns) {
+    const match = query.match(pattern);
+    const candidate = match?.[1]?.trim();
+    if (candidate && !/^(january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(candidate)) {
+      const knownDestination = destinations.find(item => item.matches.some(destination => candidate.toLowerCase().includes(destination)));
+      if (knownDestination) return knownDestination.name;
+      return candidate.replace(/\b[a-z]/g, letter => letter.toUpperCase());
+    }
+  }
+
+  return destinations.find(item => item.matches.some(match => lower.includes(match)))?.name || null;
+}
+
 // Fallback intelligence for destination knowledge when running offline or without an API key
 function extractDestinationFallback(query: string): { destination: string; origin: string; duration: string; budget: string; style: string } {
   const lower = query.toLowerCase();
-  
-  // Destinations
-  const destinations = [
-    { name: 'Tokyo, Japan', matches: ['tokyo', 'japan', 'kyoto', 'osaka'] },
-    { name: 'Paris, France', matches: ['paris', 'france', 'nice', 'lyon'] },
-    { name: 'Rome, Italy', matches: ['rome', 'italy', 'florence', 'venice', 'milan'] },
-    { name: 'Bali, Indonesia', matches: ['bali', 'indonesia', 'ubud', 'seminyak'] },
-    { name: 'New York City, USA', matches: ['new york', 'nyc', 'manhattan', 'brooklyn'] },
-    { name: 'London, UK', matches: ['london', 'uk', 'england', 'britain'] },
-    { name: 'Barcelona, Spain', matches: ['barcelona', 'spain', 'madrid', 'seville'] },
-    { name: 'Bangkok, Thailand', matches: ['bangkok', 'thailand', 'phuket', 'chiang mai'] },
-    { name: 'Dubai, UAE', matches: ['dubai', 'uae', 'abu dhabi'] },
-    { name: 'Amsterdam, Netherlands', matches: ['amsterdam', 'netherlands', 'holland'] },
-    { name: 'Sydney, Australia', matches: ['sydney', 'australia', 'melbourne'] },
-    { name: 'Reykjavik, Iceland', matches: ['iceland', 'reykjavik'] },
-    { name: 'Singapore', matches: ['singapore'] },
-    { name: 'Seoul, South Korea', matches: ['seoul', 'korea'] },
-    { name: 'Athens, Greece', matches: ['athens', 'greece', 'santorini', 'mykonos'] },
-    { name: 'Cape Town, South Africa', matches: ['cape town', 'south africa'] },
-  ];
-
-  let detectedDest = 'Tokyo, Japan';
-  for (const item of destinations) {
-    if (item.matches.some(m => lower.includes(m))) {
-      detectedDest = item.name;
-      break;
-    }
-  }
+  const detectedDest = extractRequestedDestination(query) || 'Destination not specified';
 
   // Duration
   let duration = '5 days';
@@ -193,7 +207,18 @@ Only output valid JSON.`;
         'budget_agent',
         'itinerary_agent',
       ];
-      const constraints: TripConstraints = parsedSupervisor.trip_constraints || extractDestinationFallback(userMessage);
+      const fallbackConstraints = extractDestinationFallback(userMessage);
+      const supervisorConstraints = parsedSupervisor.trip_constraints || {};
+      const constraints: TripConstraints = {
+        destination: extractRequestedDestination(userMessage) || supervisorConstraints.destination || fallbackConstraints.destination,
+        origin: supervisorConstraints.origin || fallbackConstraints.origin,
+        duration: supervisorConstraints.duration || fallbackConstraints.duration,
+        budget: supervisorConstraints.budget || fallbackConstraints.budget,
+        travel_style: supervisorConstraints.travel_style || fallbackConstraints.style,
+        special_preferences: Array.isArray(supervisorConstraints.special_preferences)
+          ? supervisorConstraints.special_preferences
+          : [],
+      };
       const reasoning = parsedSupervisor.supervisor_reasoning || 'Supervisor routed request to flight, lodging, weather, budget, and itinerary specialists.';
 
       // 2. Multi-agent generation in parallel
@@ -268,7 +293,7 @@ Only output valid JSON.`;
     }
   }
 
-  // Fallback Multi-Agent Synthesis (fast, comprehensive, high fidelity)
+  // Use a deterministic local plan when Gemini is unavailable.
   const extracted = extractDestinationFallback(userMessage);
   const selectedAgents: AgentName[] = [
     'flight_agent',
@@ -287,9 +312,14 @@ Only output valid JSON.`;
     special_preferences: ['Local food immersion', 'Efficient transit', 'Scenic highlights'],
   };
 
-  const reasoning = `Supervisor detected travel request for ${extracted.destination} with a ${extracted.duration} timeline and ${extracted.budget} budget. Assigned all 5 specialist agents to develop an integrated itinerary with flight logistics, lodging tiers, weather packing, and financial projections.`;
+  const reasoning = `Supervisor detected travel request for ${extracted.destination} with a ${extracted.duration} timeline and ${extracted.budget} budget. The deterministic local fallback was used because Gemini is unavailable; verify estimates and availability before booking.`;
 
-  const flightResults = `### ✈️ Flight Agent Intelligence
+  const isIndia = constraints.destination.toLowerCase().includes('india');
+  const flightResults = isIndia ? `### ✈️ Flight Agent Intelligence
+- **Major Arrival Airports**: Indira Gandhi International (DEL, Delhi), Chhatrapati Shivaji Maharaj International (BOM, Mumbai), and other hubs depending on your route.
+- **Typical Flight Duration**: Varies significantly by departure city and destination within India; compare routes to your first stop.
+- **Booking Advice**: Check baggage rules and book domestic connections with enough time between flights.
+` : `### ✈️ Flight Agent Intelligence
 - **Likely Departure**: ${constraints.origin}
 - **Primary Arrival Hubs**: Main International Airport (${constraints.destination.split(',')[0]} International)
 - **Primary Carriers Serving Route**: Major alliance carriers & regional non-stop services
@@ -298,13 +328,22 @@ Only output valid JSON.`;
 - **Pricing Alert**: Peak seasons typically see a 30-45% fare increase. Book at least 6-8 weeks in advance for best fares.
 - **Booking Advice**: Set price alerts on Google Flights; mid-week departures (Tuesday/Wednesday) often yield 15% savings.`;
 
-  const hotelResults = `### 🏨 Hotel Agent Recommendations
+  const hotelResults = isIndia ? `### 🏨 Hotel Agent Recommendations
+1. **Delhi**: Stay near Connaught Place or Aerocity for convenient transport and a range of dining options.
+2. **Agra**: Choose Taj Ganj or another well-connected area near the Taj Mahal; confirm the property's current access and reviews.
+3. **Jaipur**: Consider the Old City or MI Road for access to historic sights, shops, and restaurants.
+- **Booking Advice**: Compare verified reviews, check air conditioning and transport arrangements, and confirm local taxes before booking.
+` : `### 🏨 Hotel Agent Recommendations
 1. **Boutique Option (Recommended)**: Charming design hotel centrally located with walking access to transit and dining ($140 - $210/night).
 2. **Budget / Value Pick**: Clean modern pod/micro-hotel or private ensuite room in a trendy neighborhood ($65 - $95/night).
 3. **Luxury Retreat**: 5-Star property with skyline/ocean views, spa amenities, and Michelin-guide concierge ($380 - $650/night).
 - **Recommended Neighborhoods**: Historic city center or creative arts district for walkability and safe night strolls.`;
 
-  const weatherResults = `### 🌦️ Weather & Packing Agent Guidance
+  const weatherResults = isIndia ? `### 🌦️ Weather & Packing Agent Guidance
+- **Season Overview**: India's climate varies widely by region and season; check city-specific forecasts once your dates are set, especially during monsoon season.
+- **Essential Packing**: Lightweight breathable clothing, comfortable walking shoes, sun protection, and a compact rain layer when appropriate.
+- **Travel Tip**: Carry water and plan outdoor sightseeing around local heat and weather conditions.
+` : `### 🌦️ Weather & Packing Agent Guidance
 - **Season Overview**: Pleasant temperate conditions with occasional breezy mornings and mild evenings.
 - **Daytime Temperatures**: 18°C - 24°C (64°F - 75°F)
 - **Nighttime Temperatures**: 12°C - 16°C (53°F - 61°F)
@@ -321,7 +360,29 @@ Only output valid JSON.`;
 - **Buffer / Souvenirs**: ~$150
 - **Money-Saving Tip**: Purchase multi-day transit passes and take advantage of free admission days at prominent national museums.`;
 
-  const draftItinerary = `## 🗺️ Draft Travel Plan: ${constraints.destination} (${constraints.duration})
+  const draftItinerary = isIndia ? `## 🗺️ Draft Travel Plan: India (${constraints.duration})
+
+> **Suggested Route**: Delhi → Agra → Jaipur (Golden Triangle)
+> **Trip Style**: ${constraints.travel_style}
+> **Budget Range**: ${constraints.budget}
+
+### Day 1 — Delhi
+Explore Humayun's Tomb and India Gate, then try local food in Old Delhi. Allow extra time for traffic.
+
+### Day 2 — Delhi
+Visit Qutub Minar and the Red Fort area, with time for a market or museum. Use app-based transport or the Metro where convenient.
+
+### Day 3 — Agra
+Travel to Agra and visit the Taj Mahal (closed Fridays; verify current entry rules) and Agra Fort.
+
+### Day 4 — Jaipur
+Continue to Jaipur. Explore the City Palace area and local markets; check opening hours before setting out.
+
+### Day 5 — Jaipur
+Visit Amber Fort early, then Hawa Mahal and the Old City. Arrange onward travel from Jaipur or return to Delhi.
+
+*This offline draft is a starting point. Confirm transport schedules, ticket availability, seasonal conditions, and current local guidance before booking.*
+` : `## 🗺️ Draft Travel Plan: ${constraints.destination} (${constraints.duration})
 
 > **Trip Style**: ${constraints.travel_style}  
 > **Budget Range**: ${constraints.budget}  

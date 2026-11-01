@@ -157,6 +157,12 @@ ENV/
 env.bak/
 venv.bak/
 
+# Node.js
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
 # Spyder project settings
 .spyderproject
 .spyproject
