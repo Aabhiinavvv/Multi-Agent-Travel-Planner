@@ -1,5 +1,6 @@
 """FastAPI entry point for the recovered Python travel-planner workflow."""
 from contextlib import asynccontextmanager
+import os
 from pathlib import Path
 import traceback
 
@@ -136,7 +137,7 @@ async def health_check():
         "message": "TripMate AI Python API is running",
         "checkpoint_storage": (
             "postgresql"
-            if __import__("os").getenv("DATABASE_URL")
+            if os.getenv("DATABASE_URL")
             else "in-memory (development only)"
         ),
         "features": [
@@ -161,6 +162,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "tools.app:app",
         host="0.0.0.0",
-        port=int(__import__("os").getenv("PORT", "8000")),
+        port=int(os.getenv("PYTHON_PORT", "8000")),
         reload=False,
     )
