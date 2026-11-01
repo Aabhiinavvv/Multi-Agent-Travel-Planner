@@ -178,7 +178,7 @@ def extract_destination(query: str) -> str:
     patterns = (
         r"\bfrom\s+.+?\s+to\s+(.+)$",
         r"\b(?:destination\s*(?:is|:)|trip\s+to|travel\s+to|"
-        r"travelling\s+to|traveling\s+to|visit|visiting|explore|to)\s+(.+)$",
+        r"travelling\s+to|traveling\s+to|visit|visiting|explore)\s+(.+)$",
         r"\b(?:trip|travel|vacation|holiday|stay)\s+in\s+(.+)$",
     )
     match = None
