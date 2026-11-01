@@ -120,7 +120,7 @@ jobs:
       - name: Compile Python files
         run: python -m compileall -q tools mcp_client.py custom_weather_mcp_server.py mcp_client_test.py test.py tests
       - name: Run Python regression tests
-        run: pytest -q tests
+        run: python -m pytest -q tests
 
   docker:
     name: Build deployment images
