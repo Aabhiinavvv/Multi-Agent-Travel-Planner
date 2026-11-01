@@ -16,6 +16,7 @@ from typing import Any, TypedDict, Annotated
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.memory import MemorySaver
@@ -730,7 +731,7 @@ graph.add_edge("guardrail_blocked", END)
 # Lazy graph + checkpoint storage
 # =========================
 _travel_graph = None
-_db_connection: psycopg.Connection | None = None
+_db_pool: ConnectionPool | None = None
 _graph_lock = threading.Lock()
 
 
@@ -741,7 +742,7 @@ def get_travel_graph():
     is omitted, MemorySaver keeps local development and tests usable, but active
     approval sessions live only for the lifetime of this Python process.
     """
-    global _travel_graph, _db_connection
+    global _travel_graph, _db_pool
 
     if _travel_graph is not None:
         return _travel_graph
@@ -752,12 +753,19 @@ def get_travel_graph():
 
         database_url = get_database_url()
         if database_url:
-            _db_connection = psycopg.connect(
-                database_url,
-                autocommit=True,
-                row_factory=dict_row,
+            _db_pool = ConnectionPool(
+                conninfo=database_url,
+                min_size=1,
+                max_size=5,
+                kwargs={
+                    "autocommit": True,
+                    "row_factory": dict_row,
+                    "prepare_threshold": 0,
+                },
+                check=ConnectionPool.check_connection,
+                open=True,
             )
-            checkpointer = PostgresSaver(_db_connection)
+            checkpointer = PostgresSaver(_db_pool)
             checkpointer.setup()
             print("LangGraph checkpointing: PostgreSQL")
         else:
@@ -773,10 +781,10 @@ def get_travel_graph():
 
 def close_resources() -> None:
     """Close the optional database connection during application shutdown."""
-    global _db_connection, _travel_graph
-    if _db_connection is not None:
-        _db_connection.close()
-        _db_connection = None
+    global _db_pool, _travel_graph
+    if _db_pool is not None:
+        _db_pool.close()
+        _db_pool = None
     _travel_graph = None
 
 
