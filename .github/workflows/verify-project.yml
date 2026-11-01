@@ -21,6 +21,59 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Smoke-test API draft and approval flow (fallback mode)
+        run: |
+          npm run dev > /tmp/tripmate-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/health > /tmp/tripmate-health.json; then
+              break
+            fi
+            sleep 2
+          done
+
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+
+          const health = await fetch('http://127.0.0.1:3000/health');
+          assert.equal(health.status, 200, 'health endpoint should return HTTP 200');
+          const healthData = await health.json();
+          assert.equal(healthData.status, 'ok');
+
+          const draftResponse = await fetch('http://127.0.0.1:3000/api/travel', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              message: 'Plan a 5-day trip to Tokyo from Delhi for two people with a moderate budget.'
+            })
+          });
+          assert.equal(draftResponse.status, 200, 'draft endpoint should return HTTP 200');
+          const draft = await draftResponse.json();
+          assert.equal(draft.success, true);
+          assert.equal(draft.requires_approval, true);
+          assert.ok(draft.thread_id, 'draft should include a thread_id');
+          assert.ok(draft.selected_agents.includes('flight_agent'));
+          assert.ok(draft.selected_agents.includes('hotel_agent'));
+
+          const approvalResponse = await fetch('http://127.0.0.1:3000/api/travel/approve', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              thread_id: draft.thread_id,
+              approved: true,
+              feedback: ''
+            })
+          });
+          assert.equal(approvalResponse.status, 200, 'approval endpoint should return HTTP 200');
+          const finalPlan = await approvalResponse.json();
+          assert.equal(finalPlan.success, true);
+          assert.equal(finalPlan.requires_approval, false);
+          assert.ok(finalPlan.answer, 'final response should not be empty');
+
+          console.log('PASS: health, travel draft, specialist selection, and approval/finalization flow.');
+          NODE
 
   python-static-checks:
     name: Python syntax and integration checks
