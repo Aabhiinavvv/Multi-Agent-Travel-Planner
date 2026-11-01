@@ -7,7 +7,6 @@ load_dotenv()
 os.environ["SSL_CERT_FILE"] = certifi.where()
 os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
 
-from typing import Any, TypedDict, Annotated
 import operator
 import uuid
 import asyncio
@@ -39,14 +38,11 @@ from mcp_client import (
 )
 
 
-def get_database_url():
-    database_url = os.getenv("DATABASE_URL")
-
+def get_database_url() -> str | None:
+    """Return the optional PostgreSQL URL; None selects in-memory dev storage."""
+    database_url = os.getenv("DATABASE_URL", "").strip()
     if not database_url:
-        raise ValueError(
-            "DATABASE_URL is missing. "
-            "Please add your Render PostgreSQL External Database URL to .env"
-        )
+        return None
 
     if "sslmode=" not in database_url:
         separator = "&" if "?" in database_url else "?"
@@ -488,7 +484,7 @@ Return:
 If exact live prices are unavailable, clearly label estimates as approximate.
 """
 
-    response = llm.invoke(
+    response = _get_llm().invoke(
         [
             SystemMessage(content="You are a practical travel budget analyst."),
             HumanMessage(content=prompt),
@@ -531,7 +527,7 @@ Make the itinerary practical, budget-aware, and easy to follow.
 Create a clear draft that is ready for human review.
 """
 
-    response = llm.invoke(
+    response = _get_llm().invoke(
         [
             SystemMessage(content="You are an expert travel planner."),
             HumanMessage(content=prompt),
@@ -638,7 +634,7 @@ Important:
 - Incorporate the human feedback when revision was requested.
 """
 
-    response = llm.invoke(
+    response = _get_llm().invoke(
         [
             SystemMessage(
                 content="You are a professional AI travel booking assistant."
