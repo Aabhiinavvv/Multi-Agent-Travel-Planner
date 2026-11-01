@@ -1,0 +1,82 @@
+name: Verify travel planner
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  typescript-build:
+    name: TypeScript build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  python-static-checks:
+    name: Python syntax and integration checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile Python files
+        run: python -m compileall -q tools mcp_client.py custom_weather_mcp_server.py mcp_client_test.py test.py
+      - name: Check recovered backend wiring
+        run: |
+          python - <<'PY'
+          import ast
+          import pathlib
+          import sys
+
+          root = pathlib.Path.cwd()
+          backend = ast.parse((root / "tools/backend.py").read_text())
+          client = ast.parse((root / "mcp_client.py").read_text())
+          app = ast.parse((root / "tools/app.py").read_text())
+
+          defined = {
+              node.name for node in client.body
+              if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+          }
+          imported = set()
+          for node in backend.body:
+              if isinstance(node, ast.ImportFrom) and node.module == "mcp_client":
+                  imported.update(alias.name for alias in node.names)
+
+          missing = sorted(imported - defined)
+          app_imports_backend_as_top_level = any(
+              isinstance(node, ast.ImportFrom) and node.module == "backend"
+              for node in app.body
+          )
+          missing_static = not (root / "tools/static").exists()
+          missing_templates = not (root / "tools/templates").exists()
+
+          print("Undefined backend MCP imports:", missing)
+          print("FastAPI uses top-level 'backend' import:", app_imports_backend_as_top_level)
+          print("tools/static absent:", missing_static)
+          print("tools/templates absent:", missing_templates)
+
+          failures = []
+          if missing:
+              failures.append("mcp_client.py is missing: " + ", ".join(missing))
+          if app_imports_backend_as_top_level:
+              failures.append("tools/app.py should import from its backend package")
+          if missing_static or missing_templates:
+              failures.append("FastAPI resolves static/templates to a directory that does not exist")
+
+          if failures:
+              print("\nDetected integration errors:")
+              for failure in failures:
+                  print("- " + failure)
+              sys.exit(1)
+          PY
