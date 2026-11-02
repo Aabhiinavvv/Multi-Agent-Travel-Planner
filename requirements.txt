@@ -18,5 +18,4 @@ langchain-mcp-adapters==0.1.14
 nest_asyncio==1.6.0
 mcp==1.28.1
 certifi==2026.6.17
-
-
+uv>=0.7,<1.0

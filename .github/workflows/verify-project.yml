@@ -1,0 +1,137 @@
+name: Verify TripMate applications
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  typescript:
+    name: TypeScript build and runtime smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type-check, build frontend and compile production server
+        run: npm run build
+      - name: Smoke-test development API and approval flow without API keys
+        run: |
+          npm run dev > /tmp/tripmate-dev.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3000/health > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+
+          const health = await fetch('http://127.0.0.1:3000/health');
+          assert.equal(health.status, 200);
+          assert.equal((await health.json()).status, 'ok');
+
+          const draftResponse = await fetch('http://127.0.0.1:3000/api/travel', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              message: 'Plan a 5-day trip to Tokyo from Delhi for two people with a moderate budget.'
+            })
+          });
+          assert.equal(draftResponse.status, 200);
+          const draft = await draftResponse.json();
+          assert.equal(draft.success, true);
+          assert.equal(draft.requires_approval, true);
+          assert.ok(draft.thread_id);
+          assert.ok(draft.selected_agents.includes('flight_agent'));
+          assert.ok(draft.selected_agents.includes('hotel_agent'));
+
+          const approvalResponse = await fetch('http://127.0.0.1:3000/api/travel/approve', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              thread_id: draft.thread_id,
+              approved: true,
+              feedback: ''
+            })
+          });
+          assert.equal(approvalResponse.status, 200);
+          const finalPlan = await approvalResponse.json();
+          assert.equal(finalPlan.success, true);
+          assert.equal(finalPlan.requires_approval, false);
+          assert.ok(finalPlan.answer);
+
+          console.log('PASS: development health, draft, agents and approval flow.');
+          NODE
+      - name: Smoke-test compiled production Node server
+        run: |
+          NODE_ENV=production PORT=3101 npm start > /tmp/tripmate-production.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:3101/health > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+
+          const health = await fetch('http://127.0.0.1:3101/health');
+          assert.equal(health.status, 200);
+          assert.equal((await health.json()).status, 'ok');
+
+          const home = await fetch('http://127.0.0.1:3101/');
+          assert.equal(home.status, 200);
+          assert.match(home.headers.get('content-type') || '', /text\/html/);
+          const html = await home.text();
+          assert.match(html, /TripMate|root/i);
+
+          console.log('PASS: compiled production server serves health and frontend.');
+          NODE
+
+  python:
+    name: Python syntax, imports and LangGraph HITL tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Compile Python files
+        run: python -m compileall -q tools mcp_client.py custom_weather_mcp_server.py mcp_client_test.py test.py tests
+      - name: Run Python regression tests
+        run: python -m pytest -q tests
+
+  docker:
+    name: Build deployment images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Build primary TypeScript image
+        run: docker build -t tripmate-typescript:ci .
+      - name: Build optional Python image
+        run: docker build -f Dockerfile.python -t tripmate-python:ci .

@@ -1,31 +1,23 @@
-FROM python:3.11-slim
+# Primary deployment: TripMate's TypeScript + Vite application.
+FROM node:22-bookworm-slim AS build
 
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
 
-ENV PYTHONDONTWRITEBITECODE=1
-ENV PYTHONUNBUFFERED=1
+COPY . .
+RUN npm run build && npm prune --omit=dev
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    git\
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+FROM node:22-bookworm-slim AS runtime
+WORKDIR /app
 
-COPY requirements.txt .
-RUN python -m pip install --upgrade pip
-RUN python -m pip install -r requirements.txt
+ENV NODE_ENV=production
+ENV PORT=3000
 
-COPY . . 
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/dist-server ./dist-server
 
-
-
-
-
-EXPOSE 8
-
-CMD ["uvicorn" , "app.app", "--host","0.0.0.0","--port","8080"]
-
-
-
-
-
+EXPOSE 3000
+CMD ["npm", "start"]

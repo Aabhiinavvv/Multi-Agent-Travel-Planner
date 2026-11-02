@@ -1,5 +1,13 @@
+"""Lazy MCP client setup for TripMate's Python agent workflow.
+
+API keys are validated only when their corresponding MCP service is used. This
+allows the FastAPI health page to start even when optional integrations are not
+configured yet.
+"""
+from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -7,317 +15,216 @@ from typing import Any
 
 import certifi
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 
-# =========================================================
-# Environment setup
-# =========================================================
+PROJECT_DIR = Path(__file__).resolve().parent
+WEATHER_SERVER_PATH = PROJECT_DIR / "custom_weather_mcp_server.py"
 
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
+load_dotenv(PROJECT_DIR / ".env", override=False)
+os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+os.environ.setdefault("REQUESTS_CA_BUNDLE", certifi.where())
 
-os.environ["SSL_CERT_FILE"] = certifi.where()
-os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
-
-TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
-
-# Support both environment-variable names.
-AVIATION_STACK_API_KEY = (
-    os.getenv("AVIATION_STACK_API_KEY")
-    or os.getenv("AVIATIONSTACK_API_KEY")
-)
-
-OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-
-WEATHER_SERVER_PATH = BASE_DIR / "custom_weather_mcp_server.py"
-UVX_COMMAND = shutil.which("uvx") or "uvx"
+_clients: dict[str, MultiServerMCPClient] = {}
+_tool_cache: dict[str, dict[str, Any]] = {}
 
 
-def _require_env(name: str, value: str | None) -> str:
-    """Return an environment value or raise a readable setup error."""
-
-    if not value:
-        raise RuntimeError(
-            f"{name} is missing. "
-            f"Add {name}=your_key to the project .env file."
-        )
-
-    return value
-
-
-def _subprocess_env(**updates: str | None) -> dict[str, str]:
-    """
-    Preserve the current Windows/Conda environment and add MCP API keys.
-    """
-
-    env = os.environ.copy()
-
-    for key, value in updates.items():
+def _required_env(name: str, *aliases: str) -> str:
+    """Return a configured environment variable or raise a useful error."""
+    for key in (name, *aliases):
+        value = os.getenv(key, "").strip()
         if value:
-            env[key] = value
+            return value
 
-    return env
-
-
-# =========================================================
-# LLM
-# =========================================================
-
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    api_key=_require_env("GROQ_API_KEY", GROQ_API_KEY),
-)
+    names = " or ".join((name, *aliases))
+    raise RuntimeError(
+        f"{names} is not configured. Add it to the project .env file "
+        "or provide it as an environment variable."
+    )
 
 
-# =========================================================
-# MCP client
-# =========================================================
-
-client = MultiServerMCPClient(
-    {
-        "tavily": {
-            "transport": "streamable_http",
-            "url": (
-                "https://mcp.tavily.com/mcp/"
-                f"?tavilyApiKey={TAVILY_API_KEY or ''}"
-            ),
-        },
-
-        "aviationstack": {
-            "transport": "stdio",
-            "command": UVX_COMMAND,
-            "args": [
-                "aviationstack-mcp",
-            ],
-            "env": _subprocess_env(
-                AVIATION_STACK_API_KEY=AVIATION_STACK_API_KEY,
-            ),
-        },
-
-        "weather": {
-            "transport": "stdio",
-
-            # Uses the Python executable from the active Conda environment.
-            "command": sys.executable,
-
-            # Uses the weather server inside the current project folder.
-            "args": [
-                str(WEATHER_SERVER_PATH),
-            ],
-
-            "env": _subprocess_env(
-                OPENWEATHER_API_KEY=OPENWEATHER_API_KEY,
-            ),
-        },
-    }
-)
-
-
-async def _get_server_tool(
-    server_name: str,
-    tool_name: str,
-):
-    """
-    Load one tool from one MCP server.
-
-    This prevents a broken weather or AviationStack server from
-    crashing an unrelated Tavily request.
-    """
+def _server_client(server_name: str) -> MultiServerMCPClient:
+    """Create one MCP client per service so missing keys stay isolated."""
+    if server_name in _clients:
+        return _clients[server_name]
 
     if server_name == "tavily":
-        _require_env(
-            "TAVILY_API_KEY",
-            TAVILY_API_KEY,
-        )
-
+        api_key = _required_env("TAVILY_API_KEY")
+        config = {
+            "tavily": {
+                "transport": "streamable_http",
+                "url": f"https://mcp.tavily.com/mcp/?tavilyApiKey={api_key}",
+            }
+        }
     elif server_name == "aviationstack":
-        _require_env(
+        api_key = _required_env(
+            "AVIATIONSTACK_API_KEY",
             "AVIATION_STACK_API_KEY",
-            AVIATION_STACK_API_KEY,
         )
-
-        if shutil.which("uvx") is None:
-            raise RuntimeError(
-                "uvx was not found. Install uv, reopen the terminal, "
-                "activate the travel environment, and run "
-                "`uvx --version`."
-            )
-
+        uvx_command = shutil.which("uvx") or "uvx"
+        aviation_env = os.environ.copy()
+        aviation_env["AVIATION_STACK_API_KEY"] = api_key
+        config = {
+            "aviationstack": {
+                "transport": "stdio",
+                "command": uvx_command,
+                "args": ["aviationstack-mcp"],
+                "env": aviation_env,
+            }
+        }
     elif server_name == "weather":
-        _require_env(
-            "OPENWEATHER_API_KEY",
-            OPENWEATHER_API_KEY,
-        )
-
+        api_key = _required_env("OPENWEATHER_API_KEY")
         if not WEATHER_SERVER_PATH.is_file():
             raise FileNotFoundError(
-                f"Weather MCP server not found: "
-                f"{WEATHER_SERVER_PATH}"
+                f"Weather MCP server not found: {WEATHER_SERVER_PATH}"
             )
-
-    # Important: load only the requested MCP server.
-    tools = await client.get_tools(
-        server_name=server_name,
-    )
-
-    tool = next(
-        (
-            item
-            for item in tools
-            if item.name == tool_name
-        ),
-        None,
-    )
-
-    if tool is None:
-        available_tools = (
-            ", ".join(
-                sorted(item.name for item in tools)
-            )
-            or "none"
-        )
-
-        raise RuntimeError(
-            f"MCP tool '{tool_name}' was not found "
-            f"on server '{server_name}'. "
-            f"Available tools: {available_tools}"
-        )
-
-    return tool
-
-
-# =========================================================
-# MCP connection test
-# =========================================================
-
-async def get_all_tools() -> None:
-    """
-    Test every MCP server independently.
-
-    One failed server will not stop the remaining tests.
-    """
-
-    for server_name in (
-        "tavily",
-        "aviationstack",
-        "weather",
-    ):
-        try:
-            tools = await client.get_tools(
-                server_name=server_name,
-            )
-
-            tool_names = (
-                ", ".join(
-                    tool.name
-                    for tool in tools
-                )
-                or "no tools"
-            )
-
-            print(
-                f"{server_name}: OK -> {tool_names}"
-            )
-
-        except Exception as exc:
-            print(
-                f"{server_name}: FAILED -> "
-                f"{type(exc).__name__}: {exc}"
-            )
-
-
-# =========================================================
-# Tavily MCP
-# =========================================================
-
-async def tavily_mcp_search(query: str):
-    search_tool = await _get_server_tool(
-        "tavily",
-        "tavily_search",
-    )
-
-    return await search_tool.ainvoke(
-        {
-            "query": query,
+        weather_env = os.environ.copy()
+        weather_env["OPENWEATHER_API_KEY"] = api_key
+        config = {
+            "weather": {
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(WEATHER_SERVER_PATH)],
+                "env": weather_env,
+            }
         }
-    )
+    else:
+        raise ValueError(f"Unknown MCP server: {server_name}")
+
+    client = MultiServerMCPClient(config)
+    _clients[server_name] = client
+    return client
 
 
-# =========================================================
-# AviationStack MCP
-# =========================================================
+async def _server_tools(server_name: str) -> dict[str, Any]:
+    """Load and cache tools for one configured MCP server."""
+    if server_name not in _tool_cache:
+        client = _server_client(server_name)
+        tools = await client.get_tools(server_name=server_name)
+        _tool_cache[server_name] = {tool.name: tool for tool in tools}
+
+        if not _tool_cache[server_name]:
+            raise RuntimeError(
+                f"{server_name} MCP connected but returned no tools."
+            )
+
+    return _tool_cache[server_name]
+
+
+async def get_all_tools() -> list[Any]:
+    """Load tools independently; a failed service does not block the others."""
+    all_tools: list[Any] = []
+    for server_name in ("tavily", "aviationstack", "weather"):
+        try:
+            tools = list((await _server_tools(server_name)).values())
+            all_tools.extend(tools)
+            print(f"\nAvailable tools from {server_name} MCP:")
+            for tool in tools:
+                print(f"  - {tool.name}")
+        except Exception as exc:
+            print(f"\nCould not connect to {server_name} MCP: {exc}")
+    return all_tools
+
+
+async def tavily_mcp_search(query: str) -> Any:
+    """Search web pages through Tavily MCP."""
+    if not query or not query.strip():
+        raise ValueError("Tavily search query cannot be empty.")
+    tools = await _server_tools("tavily")
+    tool = tools.get("tavily_search")
+    if tool is None:
+        raise RuntimeError(
+            "Tavily MCP did not expose 'tavily_search'. "
+            f"Available tools: {', '.join(sorted(tools)) or 'none'}"
+        )
+    return await tool.ainvoke({"query": query.strip()})
+
 
 async def aviation_mcp_call(
     tool_name: str,
     tool_args: dict[str, Any] | None = None,
-):
-    aviation_tool = await _get_server_tool(
-        "aviationstack",
-        tool_name,
-    )
-
-    return await aviation_tool.ainvoke(
-        tool_args or {}
-    )
-
-
-# =========================================================
-# Weather MCP
-# =========================================================
-
-async def weather_mcp_search(city: str):
-    weather_tool = await _get_server_tool(
-        "weather",
-        "get_current_weather",
-    )
-
-    return await weather_tool.ainvoke(
-        {
-            "city": city,
-        }
-    )
+) -> Any:
+    """Invoke a named AviationStack MCP tool."""
+    tools = await _server_tools("aviationstack")
+    tool = tools.get(tool_name)
+    if tool is None:
+        raise ValueError(
+            f"AviationStack tool '{tool_name}' was not found. "
+            f"Available tools: {', '.join(sorted(tools)) or 'none'}"
+        )
+    return await tool.ainvoke(tool_args or {})
 
 
-async def forecast_mcp_search(city: str):
-    forecast_tool = await _get_server_tool(
-        "weather",
-        "get_forecast",
-    )
+async def weather_mcp_call(
+    tool_name: str,
+    tool_args: dict[str, Any] | None = None,
+) -> Any:
+    """Invoke a named custom Weather MCP tool."""
+    tools = await _server_tools("weather")
+    tool = tools.get(tool_name)
+    if tool is None:
+        raise ValueError(
+            f"Weather tool '{tool_name}' was not found. "
+            f"Available tools: {', '.join(sorted(tools)) or 'none'}"
+        )
+    return await tool.ainvoke(tool_args or {})
 
-    return await forecast_tool.ainvoke(
-        {
-            "city": city,
-        }
-    )
-
-
-# =========================================================
-# Destination extractor
-# =========================================================
 
 def extract_destination(query: str) -> str:
-    prompt = f"""
-Extract only the destination city or country from the travel request.
+    """Extract a likely destination from a natural-language trip request."""
+    text = str(query or "").strip()
+    if not text:
+        return ""
 
-Travel request:
-{query}
+    patterns = (
+        r"\bfrom\s+.+?\s+to\s+(.+)$",
+        r"\b(?:destination\s*(?:is|:)|trip\s+to|travel\s+to|"
+        r"travelling\s+to|traveling\s+to|visit|visiting|explore)\s+(.+)$",
+        r"\b(?:trip|travel|vacation|holiday|stay)\s+in\s+(.+)$",
+    )
+    match = None
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            break
 
-Return only the destination name.
-Do not add any explanation.
-"""
+    if not match:
+        return ""
 
-    response = llm.invoke(prompt)
+    candidate = match.group(1).strip(" \t,.;:!?")
+    candidate = re.split(
+        r"\s+(?:from|for|during|between|with|under|within|in|starting|"
+        r"departing|leaving|on|next)\b|[,;.!?]",
+        candidate,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    candidate = re.sub(
+        r"^(?:the city of|city of)\s+",
+        "",
+        candidate,
+        flags=re.IGNORECASE,
+    )
+    return candidate.strip()
 
-    destination = str(
-        response.content
-    ).strip()
 
-    if not destination:
-        raise ValueError(
-            "The destination could not be extracted."
-        )
+async def weather_mcp_search(city: str) -> Any:
+    """Get current weather for a destination city."""
+    city = str(city or "").strip()
+    if not city:
+        raise ValueError("A destination city is required for weather lookup.")
+    return await weather_mcp_call(
+        "get_current_weather",
+        {"city": city},
+    )
 
-    return destination
+
+async def forecast_mcp_search(city: str) -> Any:
+    """Get the short-range forecast for a destination city."""
+    city = str(city or "").strip()
+    if not city:
+        raise ValueError("A destination city is required for forecast lookup.")
+    return await weather_mcp_call(
+        "get_forecast",
+        {"city": city},
+    )
